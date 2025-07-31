@@ -2,7 +2,7 @@ fastapi
 uvicorn
 beautifulsoup4
 requests
-sentence-transformers
-faiss-cpu
+sentence-transformers>=2.2.0
 nltk
 weaviate-client
+numpy

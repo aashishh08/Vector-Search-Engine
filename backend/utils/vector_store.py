@@ -1,26 +1,53 @@
 import weaviate
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict
-import uuid
+import re
 
-# Initialize global model
-_model = SentenceTransformer('all-MiniLM-L6-v2')
+# Initialize model - using a better model for improved semantic search
+_model = SentenceTransformer('all-mpnet-base-v2')
 _embedding_dimension = _model.get_sentence_embedding_dimension()
 
-# Global variables for Weaviate client
+# Global variables
 client = None
 CLASS_NAME = "Chunk"
 
-# Simple in-memory fallback for testing
+# In-memory fallback
 _in_memory_chunks = []
 _in_memory_embeddings = []
 
+
+
+def calculate_content_relevance(content: str, query: str) -> float:
+    """Calculate content relevance boost based on query term presence."""
+    content_lower = content.lower()
+    query_terms = query.lower().split()
+    
+    # Count query terms in content
+    term_matches = sum(1 for term in query_terms if term in content_lower)
+    term_ratio = term_matches / len(query_terms) if query_terms else 0
+    
+    # Calculate term frequency boost
+    total_occurrences = sum(content_lower.count(term) for term in query_terms)
+    frequency_boost = min(0.1, total_occurrences * 0.02)  # Max 10% boost
+    
+    # Calculate proximity boost (terms appearing close together)
+    proximity_boost = 0
+    if len(query_terms) > 1:
+        # Check if multiple terms appear in the same sentence
+        sentences = re.split(r'[.!?]+', content)
+        for sentence in sentences:
+            sentence_lower = sentence.lower()
+            if all(term in sentence_lower for term in query_terms):
+                proximity_boost += 0.05  # 5% boost per sentence with all terms
+    
+    total_boost = (term_ratio * 0.15) + frequency_boost + min(0.1, proximity_boost)
+    return total_boost
+
 def _get_client():
-    """Get or create Weaviate client with connection."""
+    """Get or create Weaviate client."""
     global client
     if client is None:
         try:
-            # Connect to local Weaviate (self-hosted Docker) - Updated to v4 API
             client = weaviate.WeaviateClient(weaviate.connect.ConnectionParams.from_url("http://localhost:8080", grpc_port=50051))
             client.connect()
             print("Connected to Weaviate successfully.")
@@ -30,8 +57,8 @@ def _get_client():
             return None
     return client
 
-# Schema setup (if not already created) - Updated to v4 API
 def setup_schema():
+    """Setup Weaviate schema."""
     client = _get_client()
     if client is None:
         return False
@@ -42,7 +69,7 @@ def setup_schema():
         
         client.collections.create(
             name=CLASS_NAME,
-            vectorizer_config=weaviate.config.Configure.Vectorizer.none(),  # We're using custom embeddings
+            vectorizer_config=weaviate.config.Configure.Vectorizer.none(),
             properties=[
                 weaviate.config.Property(name="text", data_type=weaviate.config.DataType.TEXT),
                 weaviate.config.Property(name="original_html_context", data_type=weaviate.config.DataType.TEXT),
@@ -54,14 +81,10 @@ def setup_schema():
         print(f"Error setting up schema: {e}")
         return False
 
-# Replaces FAISS index + chunk metadata wipe - Updated to v4 API
 def clear_vector_store():
-    """
-    Clears all vector data from Weaviate (entire Chunk class objects).
-    """
+    """Clear all vector data."""
     global _in_memory_chunks, _in_memory_embeddings
     
-    # Clear in-memory storage
     _in_memory_chunks = []
     _in_memory_embeddings = []
     
@@ -82,21 +105,16 @@ def clear_vector_store():
     except Exception as e:
         print(f"Error clearing vector store: {e}")
 
-# Replaces FAISS add() and _chunks_metadata.extend() - Updated to v4 API
 def embed_and_index_chunks(chunks: List[Dict]):
-    """
-    Embeds and inserts text chunks into Weaviate with metadata.
-    """
+    """Embed and index text chunks."""
     global _in_memory_chunks, _in_memory_embeddings
     
     if not chunks:
         return
 
-    # Generate embeddings
     texts = [c["text"] for c in chunks]
     embeddings = _model.encode(texts).tolist()
     
-    # Store in memory for fallback
     _in_memory_chunks.extend(chunks)
     _in_memory_embeddings.extend(embeddings)
 
@@ -107,7 +125,6 @@ def embed_and_index_chunks(chunks: List[Dict]):
         return
 
     try:
-        # Insert chunks with their embeddings
         collection = client.collections.get(CLASS_NAME)
         for chunk, embedding in zip(chunks, embeddings):
             collection.data.insert(
@@ -122,29 +139,21 @@ def embed_and_index_chunks(chunks: List[Dict]):
     except Exception as e:
         print(f"Error indexing chunks: {e}")
 
-# Replaces FAISS search() and indexed metadata lookup - Updated to v4 API
 def search_chunks_in_store(query: str, top_k: int = 10) -> List[Dict]:
-    """
-    Searches Weaviate for the most relevant text chunks by query.
-    Returns chunk with same structure as before (including score).
-    """
+    """Search for relevant text chunks."""
     global _in_memory_chunks, _in_memory_embeddings
     
-    # Generate query embedding
     query_vector = _model.encode([query])[0].tolist()
     
-    # Simple cosine similarity search for in-memory fallback
+    # In-memory search fallback
     if _in_memory_chunks and _in_memory_embeddings:
         import numpy as np
         
-        # Calculate cosine similarities
         similarities = []
         for embedding in _in_memory_embeddings:
-            # Convert to numpy arrays for calculation
             query_np = np.array(query_vector)
             embed_np = np.array(embedding)
             
-            # Calculate cosine similarity
             dot_product = np.dot(query_np, embed_np)
             norm_query = np.linalg.norm(query_np)
             norm_embed = np.linalg.norm(embed_np)
@@ -156,17 +165,21 @@ def search_chunks_in_store(query: str, top_k: int = 10) -> List[Dict]:
                 
             similarities.append(similarity)
         
-        # Get top-k results
         top_indices = np.argsort(similarities)[::-1][:top_k]
         
         results = []
         for idx in top_indices:
-            if similarities[idx] > 0:  # Only include positive similarities
+            if similarities[idx] > 0:
+                # Enhanced scoring with content relevance boost
+                base_score = similarities[idx]
+                content_boost = calculate_content_relevance(_in_memory_chunks[idx]["text"], query)
+                final_score = min(1.0, base_score + content_boost)
+                
                 results.append({
                     "text": _in_memory_chunks[idx]["text"],
                     "original_html_context": _in_memory_chunks[idx]["original_html_context"],
                     "path": _in_memory_chunks[idx]["path"],
-                    "score": round(similarities[idx], 4)
+                    "score": round(final_score, 4)
                 })
         
         print(f"Found {len(results)} results using in-memory search.")
@@ -178,20 +191,18 @@ def search_chunks_in_store(query: str, top_k: int = 10) -> List[Dict]:
         return []
 
     try:
-        # Use the correct Weaviate v4 API for vector search
         result = client.collections.get(CLASS_NAME).with_near_vector({
             "vector": query_vector
         }).with_limit(top_k).with_additional(["distance"]).do()
 
         matches = result.objects
         
-        # Convert to previous format + include distance as score (lower distance is better, so we invert)
         return [
             {
                 "text": m.properties["text"],
                 "original_html_context": m.properties["original_html_context"],
                 "path": m.properties["path"],
-                "score": round(1 - m.metadata.distance, 4)  # Convert distance to similarity score
+                "score": round(1 - m.metadata.distance, 4)
             }
             for m in matches
         ]

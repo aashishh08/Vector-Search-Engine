@@ -1,34 +1,36 @@
-"use client"
+"use client";
 
-import type React from "react"
-
-import { useState } from "react"
+import { useState } from "react";
 
 interface Props {
-  text: string
-  match: number
-  path?: string
+  text: string;
+  html: string;
+  match: number;
+  path?: string;
 }
 
-const ResultCard: React.FC<Props> = ({ text, match, path }) => {
-  const [showHTML, setShowHTML] = useState<boolean>(false)
+const ResultCard: React.FC<Props> = ({ text, html, match, path }) => {
+  const [showHTML, setShowHTML] = useState(false);
 
-  // Extract readable title from the HTML content
   const getTitle = () => {
-    if (typeof window === "undefined") return text.slice(0, 100)
+    if (typeof window === "undefined") return text.slice(0, 100);
 
-    const tempDiv = document.createElement("div")
-    tempDiv.innerHTML = text
-    const firstHeading = tempDiv.querySelector("h1,h2,h3,h4,h5,h6")
-    const plainText = tempDiv.textContent || ""
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = text;
 
-    if (firstHeading && firstHeading.textContent) {
-      return firstHeading.textContent
+    // Try to find a heading first
+    const heading = tempDiv.querySelector("h1,h2,h3,h4,h5,h6");
+    if (heading && heading.textContent) {
+      return heading.textContent;
     }
-    return plainText.split(". ")[0] || text.slice(0, 100)
-  }
 
-  const title = getTitle()
+    // Fallback to first sentence
+    const plainText = tempDiv.textContent || "";
+    const firstSentence = plainText.split(". ")[0];
+    return firstSentence || text.slice(0, 100);
+  };
+
+  const title = getTitle();
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
@@ -57,12 +59,12 @@ const ResultCard: React.FC<Props> = ({ text, match, path }) => {
       {showHTML && (
         <div className="mt-3">
           <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs overflow-auto max-h-48 text-gray-700 font-mono">
-            {text}
+            {html}
           </pre>
         </div>
       )}
     </div>
-  )
-}
+  );
+};
 
-export default ResultCard
+export default ResultCard;

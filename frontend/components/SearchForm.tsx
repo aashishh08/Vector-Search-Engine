@@ -1,27 +1,24 @@
-"use client"
+"use client";
 
-import type React from "react"
-
-import { useState } from "react"
+import { useState } from "react";
 
 interface SearchFormProps {
-  onSearch: (url: string, query: string) => void
-  loading: boolean
+  onSearch: (url: string, query: string) => void;
+  loading: boolean;
 }
 
 const SearchForm: React.FC<SearchFormProps> = ({ onSearch, loading }) => {
-  const [url, setUrl] = useState<string>("https://smarter.codes")
-  const [query, setQuery] = useState<string>("AI")
+  const [url, setUrl] = useState("https://smarter.codes");
+  const [query, setQuery] = useState("AI");
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    onSearch(url, query)
-  }
+    e.preventDefault();
+    onSearch(url, query);
+  };
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
       <form onSubmit={handleSubmit}>
-        {/* URL Input */}
         <div className="mb-4">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -38,7 +35,6 @@ const SearchForm: React.FC<SearchFormProps> = ({ onSearch, loading }) => {
           </div>
         </div>
 
-        {/* Search Input and Button */}
         <div className="flex gap-3">
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -63,7 +59,7 @@ const SearchForm: React.FC<SearchFormProps> = ({ onSearch, loading }) => {
         </div>
       </form>
     </div>
-  )
-}
+  );
+};
 
-export default SearchForm
+export default SearchForm;
